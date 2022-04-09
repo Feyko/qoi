@@ -2,7 +2,6 @@ package qoi
 
 import (
 	"bufio"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
@@ -35,13 +34,17 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 	if err != nil {
 		return image.Config{}, fmt.Errorf("could not decode the header: %w", err)
 	}
-	return decoder.config, nil
+	return image.Config{
+		ColorModel: color.NRGBAModel,
+		Width:      decoder.header.width,
+		Height:     decoder.header.height,
+	}, nil
 }
 
 type Decoder struct {
 	data          *bufio.Reader
-	headerBytes   []byte
-	config        image.Config
+	headerBytes   headerBytes
+	header        Header
 	pixelWindow   [64]pixel
 	currentPixel  pixel
 	currentByte   byte
@@ -58,7 +61,8 @@ func (d *Decoder) decodeHeader() error {
 	if err != nil {
 		return fmt.Errorf("could notdecodeImage read header: %w", err)
 	}
-	err = d.interpretHeaderBytes()
+	header, err := interpretHeaderBytes(d.headerBytes)
+	d.header = header
 	if err != nil {
 		return fmt.Errorf("could not interpret the header: %w", err)
 	}
@@ -66,34 +70,16 @@ func (d *Decoder) decodeHeader() error {
 }
 
 func (d *Decoder) readHeader() error {
-	headerBytes := make([]byte, headerLength)
-	_, err := io.ReadAtLeast(d.data, headerBytes, headerLength)
+	_, err := io.ReadAtLeast(d.data, d.headerBytes[:], headerLength)
 	if err != nil {
 		return errors.New("data is too short")
-	}
-	d.headerBytes = headerBytes
-	return nil
-}
-
-func (d *Decoder) interpretHeaderBytes() error {
-	magic := d.headerBytes[:4]
-	if string(magic) != qoiMagic {
-		return fmt.Errorf("invalid magic '%v'", magic)
-	}
-	width := int(binary.BigEndian.Uint32(d.headerBytes[4:]))
-	length := int(binary.BigEndian.Uint32(d.headerBytes[8:]))
-
-	d.config = image.Config{
-		ColorModel: color.NRGBAModel,
-		Width:      width,
-		Height:     length,
 	}
 	return nil
 }
 
 func (d *Decoder) decodeBody() (image.Image, error) {
 	d.currentPixel = pixel{0, 0, 0, 255}
-	img := image.NewNRGBA(image.Rect(0, 0, d.config.Width, d.config.Height))
+	img := image.NewNRGBA(image.Rect(0, 0, d.header.width, d.header.height))
 	d.img = img
 	d.imgPixelBytes = img.Pix
 	for len(d.imgPixelBytes) > 0 {
