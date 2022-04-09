@@ -32,5 +32,5 @@ func TestDecode(t *testing.T) {
 	assert.NoErrorf(t, err, "Could not decode the QOI test image: %w", err)
 	pngImg, _, err := image.Decode(pngFile)
 	assert.NoErrorf(t, err, "Could not decode the PNG test image: %w", err)
-	assert.EqualValues(t, pngImg, qoiImg)
+	assert.Equal(t, pngImg, qoiImg)
 }
