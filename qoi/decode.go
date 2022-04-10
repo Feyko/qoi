@@ -50,6 +50,8 @@ type Decoder struct {
 	currentByte   byte
 	img           image.Image
 	imgPixelBytes []byte
+
+	opMap map[byte]func() error
 }
 
 func NewDecoder(data io.Reader) Decoder {
@@ -78,6 +80,8 @@ func (d *Decoder) readHeader() error {
 }
 
 func (d *Decoder) decodeBody() (image.Image, error) {
+	d.fillOPMap()
+
 	d.currentPixel = pixel{0, 0, 0, 255}
 	img := image.NewNRGBA(image.Rect(0, 0, int(d.header.width), int(d.header.height)))
 	d.img = img
@@ -102,8 +106,8 @@ func (d *Decoder) decodeBody() (image.Image, error) {
 	return d.img, nil
 }
 
-func (d *Decoder) dispatchOP() error {
-	dispatcherMap := map[byte]func() error{
+func (d *Decoder) fillOPMap() {
+	d.opMap = map[byte]func() error{
 		quoi_OP_RGB:   d.op_RGB,
 		quoi_OP_RGBA:  d.op_RGBA,
 		quoi_OP_INDEX: d.op_INDEX,
@@ -111,9 +115,11 @@ func (d *Decoder) dispatchOP() error {
 		quoi_OP_LUMA:  d.op_LUMA,
 		quoi_OP_RUN:   d.op_RUN,
 	}
+}
 
+func (d *Decoder) dispatchOP() error {
 	op := getOP(d.currentByte)
-	return dispatcherMap[op]()
+	return d.opMap[op]()
 }
 
 func (d *Decoder) op_RGB() error {
