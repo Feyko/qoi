@@ -36,8 +36,8 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 	}
 	return image.Config{
 		ColorModel: color.NRGBAModel,
-		Width:      decoder.header.width,
-		Height:     decoder.header.height,
+		Width:      int(decoder.header.width),
+		Height:     int(decoder.header.height),
 	}, nil
 }
 
@@ -45,7 +45,7 @@ type Decoder struct {
 	data          *bufio.Reader
 	headerBytes   headerBytes
 	header        Header
-	pixelWindow   [64]pixel
+	pixelWindow   [windowLength]pixel
 	currentPixel  pixel
 	currentByte   byte
 	img           image.Image
@@ -79,7 +79,7 @@ func (d *Decoder) readHeader() error {
 
 func (d *Decoder) decodeBody() (image.Image, error) {
 	d.currentPixel = pixel{0, 0, 0, 255}
-	img := image.NewNRGBA(image.Rect(0, 0, d.header.width, d.header.height))
+	img := image.NewNRGBA(image.Rect(0, 0, int(d.header.width), int(d.header.height)))
 	d.img = img
 	d.imgPixelBytes = img.Pix
 	for len(d.imgPixelBytes) > 0 {

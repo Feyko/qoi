@@ -31,27 +31,30 @@ const headerLength = 4 + 4 + 4 + 1 + 1
 
 type headerBytes [headerLength]byte
 
-const qoiMagic = "qoif"
+var qoiMagicBytes = [4]byte{byte('q'), byte('o'), byte('i'), byte('f')}
+
+const windowLength = 64
 
 type Header struct {
-	magic      string
-	width      int
-	height     int
+	magic      [4]byte
+	width      uint32
+	height     uint32
 	channels   byte
 	colorspace byte
 }
 
 func interpretHeaderBytes(headerBytes headerBytes) (Header, error) {
-	magic := headerBytes[:4]
-	if string(magic) != qoiMagic {
-		return Header{}, fmt.Errorf("invalid magic '%v'", magic)
+	var magic [4]byte
+	copy(magic[:], headerBytes[:4])
+	if magic != qoiMagicBytes {
+		return Header{}, fmt.Errorf("invalid magic %v, expected %v", magic, qoiMagicBytes)
 	}
-	width := int(binary.BigEndian.Uint32(headerBytes[4:]))
-	length := int(binary.BigEndian.Uint32(headerBytes[8:]))
+	width := binary.BigEndian.Uint32(headerBytes[4:])
+	length := binary.BigEndian.Uint32(headerBytes[8:])
 
 	channels := headerBytes[9]
 	colorspace := headerBytes[10]
-	return Header{string(magic), width, length, channels, colorspace}, nil
+	return Header{magic, width, length, channels, colorspace}, nil
 }
 
 func (h Header) write(w io.Writer) error {
