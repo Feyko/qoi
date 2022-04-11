@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"image"
 	"image/color"
 	"io"
@@ -106,7 +105,7 @@ func (d *Decoder) decodeBody() (image.Image, error) {
 }
 
 func (d *Decoder) cacheCurrentPixel() {
-	d.pixelWindow[d.currentPixel.Hash()] = slices.Clone(d.currentPixel)
+	d.pixelWindow[d.currentPixel.Hash()] = d.currentPixel // We do not check for equality as copying a 4B array is faster than checking
 }
 
 func (d *Decoder) dispatchOP() error {
@@ -136,14 +135,14 @@ func (d *Decoder) op_RGB() error {
 }
 
 func (d *Decoder) op_RGBA() error {
-	_, err := io.ReadFull(d.data, d.currentPixel)
+	_, err := io.ReadFull(d.data, d.currentPixel[:])
 	d.writeCurrentPixel()
 	return err
 }
 
 func (d *Decoder) op_INDEX() error {
 	index := d.currentByte & 0b00111111
-	copy(d.currentPixel, d.pixelWindow[index])
+	d.currentPixel = d.pixelWindow[index]
 	d.writeCurrentPixel()
 	return nil
 }
@@ -194,6 +193,6 @@ func (d *Decoder) repeat(n byte) {
 }
 
 func (d *Decoder) writeCurrentPixel() {
-	copy(d.imgPixelBytes[:4], d.currentPixel)
+	copy(d.imgPixelBytes[:4], d.currentPixel[:])
 	d.imgPixelBytes = d.imgPixelBytes[4:]
 }

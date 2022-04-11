@@ -1,6 +1,6 @@
 package qoi
 
-type pixel []byte
+type pixel [4]byte
 
 func (p pixel) R() byte {
 	return p[0]
@@ -22,7 +22,7 @@ func (p pixel) Components() (byte, byte, byte, byte) {
 	return p.R(), p.G(), p.B(), p.A()
 }
 
-func (p pixel) Add(r, g, b byte) {
+func (p *pixel) Add(r, g, b byte) {
 	p[0] += r
 	p[1] += g
 	p[2] += b
