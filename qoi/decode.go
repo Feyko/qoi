@@ -80,7 +80,7 @@ func (d *Decoder) readHeader() error {
 }
 
 func (d *Decoder) decodeBody() (image.Image, error) {
-	d.currentPixel = pixel{0, 0, 0, 255}
+	d.currentPixel = newPixel([4]byte{0, 0, 0, 255})
 	img := image.NewNRGBA(image.Rect(0, 0, int(d.header.width), int(d.header.height)))
 	d.img = img
 	d.imgPixelBytes = img.Pix
@@ -129,13 +129,15 @@ func (d *Decoder) dispatchOP() error {
 }
 
 func (d *Decoder) op_RGB() error {
-	_, err := io.ReadFull(d.data, d.currentPixel[:3])
+	_, err := io.ReadFull(d.data, d.currentPixel.v[:3])
+	d.currentPixel.calculateHash()
 	d.writeCurrentPixel()
 	return err
 }
 
 func (d *Decoder) op_RGBA() error {
-	_, err := io.ReadFull(d.data, d.currentPixel[:])
+	_, err := io.ReadFull(d.data, d.currentPixel.v[:])
+	d.currentPixel.calculateHash()
 	d.writeCurrentPixel()
 	return err
 }
@@ -193,6 +195,6 @@ func (d *Decoder) repeat(n byte) {
 }
 
 func (d *Decoder) writeCurrentPixel() {
-	copy(d.imgPixelBytes[:4], d.currentPixel[:])
+	copy(d.imgPixelBytes[:4], d.currentPixel.v[:])
 	d.imgPixelBytes = d.imgPixelBytes[4:]
 }
