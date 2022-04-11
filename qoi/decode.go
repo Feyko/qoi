@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"golang.org/x/exp/slices"
 	"image"
 	"image/color"
 	"io"
@@ -81,12 +82,12 @@ func (d *Decoder) readHeader() error {
 
 func (d *Decoder) decodeBody() (image.Image, error) {
 	d.fillOPMap()
-
 	d.currentPixel = pixel{0, 0, 0, 255}
 	img := image.NewNRGBA(image.Rect(0, 0, int(d.header.width), int(d.header.height)))
 	d.img = img
 	d.imgPixelBytes = img.Pix
 	for len(d.imgPixelBytes) > 0 {
+
 		b, err := d.data.ReadByte()
 		if err == io.EOF {
 			return d.img, nil
@@ -99,11 +100,14 @@ func (d *Decoder) decodeBody() (image.Image, error) {
 		if err != nil {
 			return nil, err
 		}
-		copy(d.imgPixelBytes[:4], d.currentPixel)
-		d.imgPixelBytes = d.imgPixelBytes[4:]
-		d.pixelWindow[d.currentPixel.Hash()] = d.currentPixel
+
+		d.cacheCurrentPixel()
 	}
 	return d.img, nil
+}
+
+func (d *Decoder) cacheCurrentPixel() {
+	d.pixelWindow[d.currentPixel.Hash()] = slices.Clone(d.currentPixel)
 }
 
 func (d *Decoder) fillOPMap() {
@@ -123,29 +127,33 @@ func (d *Decoder) dispatchOP() error {
 }
 
 func (d *Decoder) op_RGB() error {
-	_, err := io.ReadFull(d.data, d.currentPixel[3:])
+	_, err := io.ReadFull(d.data, d.currentPixel[:3])
+	d.writeCurrentPixel()
 	return err
 }
 
 func (d *Decoder) op_RGBA() error {
 	_, err := io.ReadFull(d.data, d.currentPixel)
+	d.writeCurrentPixel()
 	return err
 }
 
 func (d *Decoder) op_INDEX() error {
-	index := d.currentPixel.Hash()
-	d.currentPixel = d.pixelWindow[index]
+	index := d.currentByte & 0b00111111
+	copy(d.currentPixel, d.pixelWindow[index])
+	d.writeCurrentPixel()
 	return nil
 }
 
 func (d *Decoder) op_DIFF() error {
 	r, g, b := getDIFFValues(d.currentByte)
 	d.currentPixel.Add(r, g, b)
+	d.writeCurrentPixel()
 	return nil
 }
 
 func getDIFFValues(diff byte) (byte, byte, byte) {
-	return diff&0b00110000 - 2, diff&0b00001100 - 2, diff&0b00000011 - 2
+	return diff&0b00110000>>4 - 2, diff&0b00001100>>2 - 2, diff&0b00000011 - 2
 }
 
 func (d *Decoder) op_LUMA() error {
@@ -156,23 +164,33 @@ func (d *Decoder) op_LUMA() error {
 	}
 	r, g, b := getLUMAValues(b1, b2)
 	d.currentPixel.Add(r, g, b)
+	d.writeCurrentPixel()
 	return nil
 }
 
 func getLUMAValues(b1, b2 byte) (byte, byte, byte) {
 	diffGreen := b1&0b00111111 - 32
-	diffRed := diffGreen + (b2 & 0b11110000) - 8
+	diffRed := diffGreen + (b2 & 0b11110000 >> 4) - 8
 	diffBlue := diffGreen + (b2 & 0b00001111) - 8
 	return diffRed, diffGreen, diffBlue
 }
 
 func (d *Decoder) op_RUN() error {
-	// Wtf, this does nothing but the test passes
-	//run := d.currentByte & 0b00111111
-	//d.repeat(run)
+	run := (d.currentByte & 0b00111111) + 1
+	if run > 62 {
+		return errors.New("illegal RUN value")
+	}
+	d.repeat(run)
 	return nil
 }
 
 func (d *Decoder) repeat(n byte) {
+	for ; n > 0; n-- {
+		d.writeCurrentPixel()
+	}
+}
 
+func (d *Decoder) writeCurrentPixel() {
+	copy(d.imgPixelBytes[:4], d.currentPixel)
+	d.imgPixelBytes = d.imgPixelBytes[4:]
 }

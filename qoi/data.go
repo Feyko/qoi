@@ -19,7 +19,7 @@ func (p pixel) A() byte {
 }
 
 func (p pixel) Components() (byte, byte, byte, byte) {
-	return p.R(), p.B(), p.R(), p.A()
+	return p.R(), p.G(), p.B(), p.A()
 }
 
 func (p pixel) Add(r, g, b byte) {
