@@ -81,7 +81,6 @@ func (d *Decoder) readHeader() error {
 }
 
 func (d *Decoder) decodeBody() (image.Image, error) {
-	d.fillOPMap()
 	d.currentPixel = pixel{0, 0, 0, 255}
 	img := image.NewNRGBA(image.Rect(0, 0, int(d.header.width), int(d.header.height)))
 	d.img = img
@@ -110,20 +109,24 @@ func (d *Decoder) cacheCurrentPixel() {
 	d.pixelWindow[d.currentPixel.Hash()] = slices.Clone(d.currentPixel)
 }
 
-func (d *Decoder) fillOPMap() {
-	d.opMap = map[byte]func() error{
-		quoi_OP_RGB:   d.op_RGB,
-		quoi_OP_RGBA:  d.op_RGBA,
-		quoi_OP_INDEX: d.op_INDEX,
-		quoi_OP_DIFF:  d.op_DIFF,
-		quoi_OP_LUMA:  d.op_LUMA,
-		quoi_OP_RUN:   d.op_RUN,
-	}
-}
-
 func (d *Decoder) dispatchOP() error {
 	op := getOP(d.currentByte)
-	return d.opMap[op]()
+	switch op {
+	case quoi_OP_RGB:
+		return d.op_RGB()
+	case quoi_OP_RGBA:
+		return d.op_RGBA()
+	case quoi_OP_INDEX:
+		return d.op_INDEX()
+	case quoi_OP_DIFF:
+		return d.op_DIFF()
+	case quoi_OP_LUMA:
+		return d.op_LUMA()
+	case quoi_OP_RUN:
+		return d.op_RUN()
+	default:
+		panic("Unknown OP")
+	}
 }
 
 func (d *Decoder) op_RGB() error {
