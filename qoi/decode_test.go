@@ -2,6 +2,7 @@ package qoi
 
 import (
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"image"
 	_ "image/png"
 	"os"
@@ -24,13 +25,13 @@ func TestDecodeConfig(t *testing.T) {
 }
 
 func TestDecode(t *testing.T) {
-	qoiFile, err := os.Open("testimage2.qoi")
-	assert.NoErrorf(t, err, "Could not read the QOI test image: %w", err)
-	pngFile, err := os.Open("testimage2.png")
-	assert.NoErrorf(t, err, "Could not read the PNG test image: %w", err)
+	qoiFile, err := os.Open("testimage.qoi")
+	require.NoErrorf(t, err, "Could not read the QOI test image: %w", err)
+	pngFile, err := os.Open("testimage.png")
+	require.NoErrorf(t, err, "Could not read the PNG test image: %w", err)
 	qoiImg, _, err := image.Decode(qoiFile)
-	assert.NoErrorf(t, err, "Could not decode the QOI test image: %w", err)
+	require.NoErrorf(t, err, "Could not decode the QOI test image: %w", err)
 	pngImg, _, err := image.Decode(pngFile)
-	assert.NoErrorf(t, err, "Could not decode the PNG test image: %w", err)
+	require.NoErrorf(t, err, "Could not decode the PNG test image: %w", err)
 	assert.Equal(t, pngImg, qoiImg)
 }
