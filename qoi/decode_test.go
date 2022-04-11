@@ -1,6 +1,7 @@
 package qoi
 
 import (
+	"github.com/disintegration/imaging"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"image"
@@ -34,4 +35,5 @@ func TestDecode(t *testing.T) {
 	pngImg, _, err := image.Decode(pngFile)
 	require.NoErrorf(t, err, "Could not decode the PNG test image: %w", err)
 	assert.Equal(t, pngImg, qoiImg)
+	imaging.Save(qoiImg, "qoi.png")
 }
