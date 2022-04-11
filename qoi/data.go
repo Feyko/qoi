@@ -18,8 +18,21 @@ func (p pixel) A() byte {
 	return p[3]
 }
 
-func (p pixel) Components() (byte, byte, byte, byte) {
-	return p.R(), p.G(), p.B(), p.A()
+// the mulX methods allow for some compiler magic to minimally enhance performance. Don't ask me how it works. Also helps with profiling
+func (p pixel) mulR() byte {
+	return p.R() * 3
+}
+
+func (p pixel) mulG() byte {
+	return p.G() * 5
+}
+
+func (p pixel) mulB() byte {
+	return p.B() * 7
+}
+
+func (p pixel) mulA() byte {
+	return p.A() * 11
 }
 
 func (p *pixel) Add(r, g, b byte) {
@@ -29,5 +42,5 @@ func (p *pixel) Add(r, g, b byte) {
 }
 
 func (p pixel) Hash() byte {
-	return (p.R()*3 + p.G()*5 + p.B()*7 + p.A()*11) % 64
+	return (p.mulR() + p.mulG() + p.mulB() + p.mulA()) % 64
 }
