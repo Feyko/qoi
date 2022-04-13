@@ -27,13 +27,13 @@ func TestDecodeConfig(t *testing.T) {
 
 func TestDecode(t *testing.T) {
 	qoiFile, err := os.Open("testimage.qoi")
-	require.NoErrorf(t, err, "Could not read the QOI test image: %w", err)
+	require.NoErrorf(t, err, "Could not read the QOI test image: %v", err)
 	pngFile, err := os.Open("testimage.png")
-	require.NoErrorf(t, err, "Could not read the PNG test image: %w", err)
+	require.NoErrorf(t, err, "Could not read the PNG test image: %v", err)
 	qoiImg, _, err := image.Decode(qoiFile)
-	require.NoErrorf(t, err, "Could not decode the QOI test image: %w", err)
+	require.NoErrorf(t, err, "Could not decode the QOI test image: %v", err)
 	pngImg, _, err := image.Decode(pngFile)
-	require.NoErrorf(t, err, "Could not decode the PNG test image: %w", err)
+	require.NoErrorf(t, err, "Could not decode the PNG test image: %v", err)
 	assert.Equal(t, pngImg, qoiImg)
 	imaging.Save(qoiImg, "qoi.png")
 }
