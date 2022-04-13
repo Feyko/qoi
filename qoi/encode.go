@@ -1,9 +1,10 @@
 package qoi
 
 import (
-	"errors"
+	"bufio"
 	"fmt"
 	"image"
+	"image/color"
 	"io"
 )
 
@@ -13,15 +14,18 @@ func Encode(w io.Writer, m image.Image) error {
 }
 
 type Encoder struct {
-	out          io.Writer
-	img          image.Image
-	header       Header
-	window       [windowLength]pixel
-	currentPixel pixel
+	out                          *bufio.Writer
+	img                          image.Image
+	header                       Header
+	window                       [windowLength]pixel
+	previousPixel, currentPixel  pixel
+	diffR, diffG, diffB, diffA   int8
+	minX, maxX, minY, maxY, x, y int
+	done                         bool
 }
 
 func NewEncoder(out io.Writer, img image.Image) Encoder {
-	return Encoder{out: out, img: img}
+	return Encoder{out: bufio.NewWriter(out), img: img}
 }
 
 func (enc Encoder) Encode() error {
@@ -39,130 +43,164 @@ func (enc Encoder) Encode() error {
 	if err != nil {
 		return fmt.Errorf("could not encode the header: %w", err)
 	}
-
-	return nil
+	return enc.encodeBody()
 }
 
 func (enc *Encoder) encodeHeader() error {
 	return enc.header.write(enc.out)
 }
 
-func (enc *Encoder) encodeBody() (image.Image, error) {
+func (enc *Encoder) encodeBody() error {
 	enc.currentPixel = newPixel([4]byte{0, 0, 0, 255})
-	img := image.NewNRGBA(image.Rect(0, 0, int(enc.header.width), int(enc.header.height)))
-	enc.img = img
-	enc.imgPixelBytes = img.Pix
-	for len(enc.imgPixelBytes) > 0 {
-
-		b, err := enc.data.ReadByte()
-		if err == io.EOF {
-			return enc.img, nil
-		}
+	enc.minX = enc.img.Bounds().Min.X
+	enc.maxX = enc.img.Bounds().Max.X
+	enc.minY = enc.img.Bounds().Min.Y
+	enc.maxY = enc.img.Bounds().Max.Y
+	enc.x = enc.minX
+	enc.y = enc.minY
+	enc.advancePixel()
+	for !enc.done {
+		err := enc.dispatchOP()
 		if err != nil {
-			return nil, err
+			return err
 		}
-		enc.currentByte = b
-		err = enc.dispatchOP()
-		if err != nil {
-			return nil, err
-		}
-
-		enc.cacheCurrentPixel()
+		//enc.cacheCurrentPixel()
 	}
-	return enc.img, nil
+	_, err := enc.out.Write([]byte{0, 0, 0, 0, 0, 0, 0, 1})
+	return err
+}
+
+func (enc *Encoder) advancePixel() {
+	c := color.NRGBAModel.Convert(enc.img.At(enc.x, enc.y))
+	c_r, c_g, c_b, c_a := c.RGBA()
+	enc.previousPixel = enc.currentPixel
+	enc.currentPixel = newPixel([4]byte{byte(c_r >> 8), byte(c_g >> 8), byte(c_b >> 8), byte(c_a >> 8)})
+	enc.updatePosition()
+}
+
+func (enc *Encoder) updatePosition() {
+	if enc.x == enc.maxX {
+		enc.y++
+		enc.x = enc.minX
+	} else {
+		enc.x++
+	}
+	if enc.x == enc.maxX && enc.y == enc.maxY {
+		enc.done = true
+		return
+	}
+	return
 }
 
 func (enc *Encoder) cacheCurrentPixel() {
-	enc.window[enc.currentPixel.Hash()] = enc.currentPixel // We do not check for equality as copying a 4B array is faster than checking
+	enc.window[enc.previousPixel.Hash()] = enc.previousPixel // We do not check for equality as copying a 4B array is faster than checking
 }
 
 func (enc *Encoder) dispatchOP() error {
-	op := getOP(enc.currentByte)
-	switch op {
-	case quoi_OP_RGB:
-		return enc.op_RGB()
-	case quoi_OP_RGBA:
-		return enc.op_RGBA()
-	case quoi_OP_INDEX:
-		return enc.op_INDEX()
-	case quoi_OP_DIFF:
-		return enc.op_DIFF()
-	case quoi_OP_LUMA:
-		return enc.op_LUMA()
-	case quoi_OP_RUN:
+	if enc.currentPixel == enc.previousPixel {
 		return enc.op_RUN()
-	default:
-		panic("Unknown OP")
 	}
+	if enc.window[enc.currentPixel.hash] == enc.currentPixel {
+		return enc.op_INDEX()
+	}
+	enc.cacheCurrentPixel()
+	enc.calculateDiff()
+	if enc.diffA != 0 {
+		return enc.op_RGBA()
+	}
+	if enc.isWithinDIFF() {
+		return enc.op_DIFF()
+	}
+	if enc.isWithinLUMA() {
+		return enc.op_LUMA()
+	}
+
+	return enc.op_RGBA()
+}
+
+func (enc *Encoder) calculateDiff() {
+	enc.diffR, enc.diffG, enc.diffB, enc.diffA = enc.currentPixel.Minus(enc.previousPixel)
+}
+
+func (enc *Encoder) isWithinDIFF() bool {
+	return isValueWithinDIFF(enc.diffR) && isValueWithinDIFF(enc.diffG) && isValueWithinDIFF(enc.diffB)
+}
+
+func isValueWithinDIFF(v int8) bool {
+	return v > -3 && v < 2
+}
+
+func (enc *Encoder) isWithinLUMA() bool {
+	return isValueWithinLUMA(enc.diffR) && isValueWithinLUMAGreen(enc.diffG) && isValueWithinLUMA(enc.diffB)
+}
+
+func isValueWithinLUMA(v int8) bool {
+	return v > -9 && v < 8
+}
+
+func isValueWithinLUMAGreen(v int8) bool {
+	return v > -33 && v < 32
 }
 
 func (enc *Encoder) op_RGB() error {
-	_, err := io.ReadFull(enc.data, enc.currentPixel.v[:3])
-	enc.currentPixel.calculateHash()
-	enc.writeCurrentPixel()
+	err := enc.out.WriteByte(quoi_OP_RGB)
+	if err != nil {
+		return err
+	}
+	_, err = enc.out.Write(enc.currentPixel.v[:3])
+	enc.advancePixel()
 	return err
 }
 
 func (enc *Encoder) op_RGBA() error {
-	_, err := io.ReadFull(enc.data, enc.currentPixel.v[:])
-	enc.currentPixel.calculateHash()
-	enc.writeCurrentPixel()
+	err := enc.out.WriteByte(quoi_OP_RGBA)
+	if err != nil {
+		return err
+	}
+	_, err = enc.out.Write(enc.currentPixel.v[:])
+	enc.advancePixel()
 	return err
 }
 
 func (enc *Encoder) op_INDEX() error {
-	index := enc.currentByte & 0b00111111
-	enc.currentPixel = enc.window[index]
-	enc.writeCurrentPixel()
-	return nil
+	err := enc.out.WriteByte(quoi_OP_INDEX | enc.currentPixel.hash)
+	enc.advancePixel()
+	return err
 }
 
 func (enc *Encoder) op_DIFF() error {
-	r, g, b := getDIFFValues(enc.currentByte)
-	enc.currentPixel.Add(r, g, b)
-	enc.writeCurrentPixel()
-	return nil
-}
-
-func getDIFFValues(diff byte) (byte, byte, byte) {
-	return diff&0b00110000>>4 - 2, diff&0b00001100>>2 - 2, diff&0b00000011 - 2
+	r := byte(enc.diffR+2) << 4
+	g := byte(enc.diffG+2) << 2
+	b := byte(enc.diffB + 2)
+	err := enc.out.WriteByte(quoi_OP_DIFF | r | g | b)
+	enc.advancePixel()
+	return err
 }
 
 func (enc *Encoder) op_LUMA() error {
-	b1 := enc.currentByte
-	b2, err := enc.data.ReadByte()
+	directionRG := byte(enc.diffR - enc.diffG)
+	directionBG := byte(enc.diffB - enc.diffG)
+	err := enc.out.WriteByte(quoi_OP_LUMA | byte(enc.diffG))
 	if err != nil {
 		return err
 	}
-	r, g, b := getLUMAValues(b1, b2)
-	enc.currentPixel.Add(r, g, b)
-	enc.writeCurrentPixel()
-	return nil
-}
-
-func getLUMAValues(b1, b2 byte) (byte, byte, byte) {
-	diffGreen := b1&0b00111111 - 32
-	diffRed := diffGreen + (b2 & 0b11110000 >> 4) - 8
-	diffBlue := diffGreen + (b2 & 0b00001111) - 8
-	return diffRed, diffGreen, diffBlue
+	err = enc.out.WriteByte(directionRG<<4 | directionBG)
+	enc.advancePixel()
+	return err
 }
 
 func (enc *Encoder) op_RUN() error {
-	run := (enc.currentByte & 0b00111111) + 1
-	if run > 62 {
-		return errors.New("illegal RUN value")
+	c := 0
+	for enc.currentPixel == enc.previousPixel {
+		c++
+		if c == 62 {
+			break
+		}
+		enc.advancePixel()
+		if enc.done {
+			c-- // Went one too far, the last advance did not change the pixel
+			break
+		}
 	}
-	enc.repeat(run)
-	return nil
-}
-
-func (enc *Encoder) repeat(n byte) {
-	for ; n > 0; n-- {
-		enc.writeCurrentPixel()
-	}
-}
-
-func (enc *Encoder) writeCurrentPixel() {
-	copy(enc.imgPixelBytes[:4], enc.currentPixel.v[:])
-	enc.imgPixelBytes = enc.imgPixelBytes[4:]
+	return enc.out.WriteByte(quoi_OP_RUN | byte(c) - 1)
 }
