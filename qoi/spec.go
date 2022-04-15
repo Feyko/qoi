@@ -31,13 +31,18 @@ func getOP(b byte) byte {
 	}
 }
 
-const headerLength = 4 + 4 + 4 + 1 + 1
+const (
+	headerLength  = 4 + 4 + 4 + 1 + 1
+	windowLength  = 64
+	diffBias      = 2
+	lumaBias      = 8
+	lumaGreenBias = 32
+	runBias       = 1
+)
 
 type headerBytes [headerLength]byte
 
 var qoiMagicBytes = [4]byte{byte('q'), byte('o'), byte('i'), byte('f')}
-
-const windowLength = 64
 
 type Header struct {
 	magic      [4]byte
@@ -63,4 +68,16 @@ func interpretHeaderBytes(headerBytes headerBytes) (Header, error) {
 
 func (h Header) write(w io.Writer) error {
 	return binary.Write(w, binary.BigEndian, h)
+}
+
+func isValueWithinDIFFSpec(v int8) bool {
+	return v > -3 && v < 2
+}
+
+func isValueWithinLUMASpec(v int8) bool {
+	return v > -9 && v < 8
+}
+
+func isGreenValueWithinLUMASpec(v int8) bool {
+	return v > -33 && v < 32
 }

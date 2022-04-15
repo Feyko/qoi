@@ -157,7 +157,7 @@ func (d *Decoder) op_DIFF() error {
 }
 
 func getDIFFValues(diff byte) (byte, byte, byte) {
-	return diff&0b00110000>>4 - 2, diff&0b00001100>>2 - 2, diff&0b00000011 - 2
+	return diff&0b00110000>>4 - diffBias, diff&0b00001100>>2 - diffBias, diff&0b00000011 - diffBias
 }
 
 func (d *Decoder) op_LUMA() error {
@@ -173,14 +173,14 @@ func (d *Decoder) op_LUMA() error {
 }
 
 func getLUMAValues(b1, b2 byte) (byte, byte, byte) {
-	diffGreen := b1&0b00111111 - 32
-	diffRed := diffGreen + (b2 & 0b11110000 >> 4) - 8
-	diffBlue := diffGreen + (b2 & 0b00001111) - 8
+	diffGreen := b1&0b00111111 - lumaGreenBias
+	diffRed := diffGreen + (b2 & 0b11110000 >> 4) - lumaBias
+	diffBlue := diffGreen + (b2 & 0b00001111) - lumaBias
 	return diffRed, diffGreen, diffBlue
 }
 
 func (d *Decoder) op_RUN() error {
-	run := (d.currentByte & 0b00111111) + 1
+	run := (d.currentByte & 0b00111111) + runBias
 	if run > 62 {
 		return errors.New("illegal RUN value")
 	}

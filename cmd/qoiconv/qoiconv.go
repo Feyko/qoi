@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"github.com/disintegration/imaging"
 	"image"
-	_ "image/jpeg"
-	_ "image/png"
 	"log"
 	"os"
 	"qoi/qoi"
-	_ "qoi/qoi"
 	"strings"
 )
 

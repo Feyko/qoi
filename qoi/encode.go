@@ -110,10 +110,10 @@ func (enc *Encoder) dispatchOP() error {
 	if enc.diffA != 0 {
 		return enc.op_RGBA()
 	}
-	if enc.isWithinDIFF() {
+	if enc.isCurrentPixelWithinDIFFSpec() {
 		return enc.op_DIFF()
 	}
-	if enc.isWithinLUMA() {
+	if enc.isCurrentPixelWithinLUMASpec() {
 		return enc.op_LUMA()
 	}
 
@@ -124,24 +124,12 @@ func (enc *Encoder) calculateDiff() {
 	enc.diffR, enc.diffG, enc.diffB, enc.diffA = enc.currentPixel.Minus(enc.previousPixel)
 }
 
-func (enc *Encoder) isWithinDIFF() bool {
-	return isValueWithinDIFF(enc.diffR) && isValueWithinDIFF(enc.diffG) && isValueWithinDIFF(enc.diffB)
+func (enc *Encoder) isCurrentPixelWithinDIFFSpec() bool {
+	return isValueWithinDIFFSpec(enc.diffR) && isValueWithinDIFFSpec(enc.diffG) && isValueWithinDIFFSpec(enc.diffB)
 }
 
-func isValueWithinDIFF(v int8) bool {
-	return v > -3 && v < 2
-}
-
-func (enc *Encoder) isWithinLUMA() bool {
-	return isValueWithinLUMA(enc.diffR-enc.diffG) && isValueWithinLUMAGreen(enc.diffG) && isValueWithinLUMA(enc.diffB-enc.diffG)
-}
-
-func isValueWithinLUMA(v int8) bool {
-	return v > -9 && v < 8
-}
-
-func isValueWithinLUMAGreen(v int8) bool {
-	return v > -33 && v < 32
+func (enc *Encoder) isCurrentPixelWithinLUMASpec() bool {
+	return isValueWithinLUMASpec(enc.diffR-enc.diffG) && isGreenValueWithinLUMASpec(enc.diffG) && isValueWithinLUMASpec(enc.diffB-enc.diffG)
 }
 
 func (enc *Encoder) op_RGB() error {
@@ -171,18 +159,18 @@ func (enc *Encoder) op_INDEX() error {
 }
 
 func (enc *Encoder) op_DIFF() error {
-	r := byte(enc.diffR+2) << 4
-	g := byte(enc.diffG+2) << 2
-	b := byte(enc.diffB + 2)
+	r := byte(enc.diffR+diffBias) << 4
+	g := byte(enc.diffG+diffBias) << 2
+	b := byte(enc.diffB + diffBias)
 	err := enc.out.WriteByte(quoi_OP_DIFF | r | g | b)
 	enc.advancePixel()
 	return err
 }
 
 func (enc *Encoder) op_LUMA() error {
-	directionRG := byte(enc.diffR - enc.diffG + 8)
-	directionBG := byte(enc.diffB - enc.diffG + 8)
-	err := enc.out.WriteByte(quoi_OP_LUMA | byte(enc.diffG+32))
+	directionRG := byte(enc.diffR - enc.diffG + lumaBias)
+	directionBG := byte(enc.diffB - enc.diffG + lumaBias)
+	err := enc.out.WriteByte(quoi_OP_LUMA | byte(enc.diffG+lumaGreenBias))
 	if err != nil {
 		return err
 	}
@@ -201,5 +189,5 @@ func (enc *Encoder) op_RUN() error {
 			break
 		}
 	}
-	return enc.out.WriteByte(quoi_OP_RUN | byte(count) - 1)
+	return enc.out.WriteByte(quoi_OP_RUN | byte(count) - runBias)
 }
