@@ -22,8 +22,6 @@ type Encoder struct {
 	diffR, diffG, diffB, diffA   int8
 	minX, maxX, minY, maxY, x, y int
 	done                         bool
-	pixCount                     int
-	byteCount                    int
 }
 
 func NewEncoder(out io.Writer, img image.Image) Encoder {
@@ -49,7 +47,6 @@ func (enc Encoder) Encode() error {
 }
 
 func (enc *Encoder) encodeHeader() error {
-	enc.byteCount += headerLength
 	return enc.header.write(enc.out)
 }
 
@@ -59,7 +56,7 @@ func (enc *Encoder) encodeBody() error {
 	enc.maxX = enc.img.Bounds().Max.X - 1
 	enc.minY = enc.img.Bounds().Min.Y
 	enc.maxY = enc.img.Bounds().Max.Y - 1
-	enc.x = enc.minX
+	enc.x = enc.minX - 1
 	enc.y = enc.minY
 	enc.advancePixel()
 	for !enc.done {
@@ -69,7 +66,6 @@ func (enc *Encoder) encodeBody() error {
 		}
 	}
 	_, err := enc.out.Write([]byte{0, 0, 0, 0, 0, 0, 0, 1})
-	enc.byteCount += 8
 	if err != nil {
 		return err
 	}
@@ -77,12 +73,11 @@ func (enc *Encoder) encodeBody() error {
 }
 
 func (enc *Encoder) advancePixel() {
+	enc.updatePosition()
 	pix := color.NRGBAModel.Convert(enc.img.At(enc.x, enc.y))
 	r, g, b, a := pix.RGBA()
 	enc.previousPixel = enc.currentPixel
 	enc.currentPixel = newUnpremultipliedPixel(r, g, b, a)
-	enc.updatePosition()
-	enc.pixCount++
 }
 
 func (enc *Encoder) updatePosition() {
@@ -104,9 +99,6 @@ func (enc *Encoder) cacheCurrentPixel() {
 }
 
 func (enc *Encoder) dispatchOP() error {
-	if enc.byteCount > 215430 {
-		enc.byteCount = enc.byteCount
-	}
 	if enc.currentPixel == enc.previousPixel {
 		return enc.op_RUN()
 	}
@@ -158,7 +150,6 @@ func (enc *Encoder) op_RGB() error {
 		return err
 	}
 	_, err = enc.out.Write(enc.currentPixel.v[:3])
-	enc.byteCount += 4
 	enc.advancePixel()
 	return err
 }
@@ -169,14 +160,12 @@ func (enc *Encoder) op_RGBA() error {
 		return err
 	}
 	_, err = enc.out.Write(enc.currentPixel.v[:])
-	enc.byteCount += 5
 	enc.advancePixel()
 	return err
 }
 
 func (enc *Encoder) op_INDEX() error {
 	err := enc.out.WriteByte(quoi_OP_INDEX | enc.currentPixel.hash)
-	enc.byteCount++
 	enc.advancePixel()
 	return err
 }
@@ -186,7 +175,6 @@ func (enc *Encoder) op_DIFF() error {
 	g := byte(enc.diffG+2) << 2
 	b := byte(enc.diffB + 2)
 	err := enc.out.WriteByte(quoi_OP_DIFF | r | g | b)
-	enc.byteCount++
 	enc.advancePixel()
 	return err
 }
@@ -199,25 +187,19 @@ func (enc *Encoder) op_LUMA() error {
 		return err
 	}
 	err = enc.out.WriteByte(directionRG<<4 | directionBG)
-	enc.byteCount += 2
 	enc.advancePixel()
 	return err
 }
 
 func (enc *Encoder) op_RUN() error {
-	c := 1
+	count := 1
 	enc.advancePixel()
 	for enc.currentPixel == enc.previousPixel && !enc.done {
-		c++
-		if c == 62 {
+		count++
+		enc.advancePixel()
+		if count == 62 {
 			break
 		}
-		enc.advancePixel()
-		//if enc.done {
-		//	c-- // Went one too far, the last advance did not change the pixel
-		//	break
-		//}
 	}
-	enc.byteCount++
-	return enc.out.WriteByte(quoi_OP_RUN | byte(c) - 1)
+	return enc.out.WriteByte(quoi_OP_RUN | byte(count) - 1)
 }
