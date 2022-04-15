@@ -13,6 +13,10 @@ func newPixel(v [4]byte) (p pixel) {
 	return
 }
 
+func newUnpremultipliedPixel(r, g, b, a uint32) (p pixel) {
+	return newPixel([4]byte{byte(r >> 8), byte(g >> 8), byte(b >> 8), byte(a >> 8)})
+}
+
 func (p pixel) R() byte {
 	return p.v[0]
 }
