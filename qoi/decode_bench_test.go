@@ -14,9 +14,6 @@ func BenchmarkDecode(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		r := bytes.NewReader(data)
-		_, err := Decode(r)
-		if err != nil {
-			b.Fatalf("%v", err)
-		}
+		Decode(r)
 	}
 }
