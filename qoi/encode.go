@@ -15,7 +15,7 @@ func Encode(w io.Writer, m image.Image) error {
 
 type Encoder struct {
 	out                          *bufio.Writer
-	img                          image.Image
+	img                          *image.NRGBA
 	header                       Header
 	window                       [windowLength]pixel
 	previousPixel, currentPixel  pixel
@@ -25,7 +25,25 @@ type Encoder struct {
 }
 
 func NewEncoder(out io.Writer, img image.Image) Encoder {
-	return Encoder{out: bufio.NewWriter(out), img: img}
+	if !isImageNRGBA(img) {
+		img = convertImageToNRGBA(img)
+	}
+	return Encoder{out: bufio.NewWriter(out), img: img.(*image.NRGBA)}
+}
+
+func isImageNRGBA(img image.Image) bool {
+	return img.ColorModel() == color.NRGBAModel
+}
+
+func convertImageToNRGBA(img image.Image) image.Image {
+	bounds := img.Bounds()
+	newImg := image.NewNRGBA(bounds)
+	for y := 0; y < bounds.Max.Y; y++ {
+		for x := 0; x < bounds.Max.X; x++ {
+			newImg.Set(x, y, img.At(x, y))
+		}
+	}
+	return newImg
 }
 
 func (enc Encoder) Encode() error {
@@ -52,12 +70,10 @@ func (enc *Encoder) encodeHeader() error {
 
 func (enc *Encoder) encodeBody() error {
 	enc.currentPixel = newPixel([4]byte{0, 0, 0, 255})
-	enc.minX = enc.img.Bounds().Min.X
-	enc.maxX = enc.img.Bounds().Max.X - 1
-	enc.minY = enc.img.Bounds().Min.Y
-	enc.maxY = enc.img.Bounds().Max.Y - 1
-	enc.x = enc.minX - 1
-	enc.y = enc.minY
+
+	enc.setupBounds()
+	enc.setupPosition()
+
 	enc.advancePixel()
 	for !enc.done {
 		err := enc.dispatchOP()
@@ -72,12 +88,23 @@ func (enc *Encoder) encodeBody() error {
 	return enc.out.Flush()
 }
 
+func (enc *Encoder) setupBounds() {
+	enc.minX = enc.img.Bounds().Min.X
+	enc.maxX = enc.img.Bounds().Max.X - 1 // 'Max' is the size of the image, not the maximum index we can use
+	enc.minY = enc.img.Bounds().Min.Y
+	enc.maxY = enc.img.Bounds().Max.Y - 1
+}
+
+func (enc *Encoder) setupPosition() {
+	enc.x = enc.minX - 1 // Initialise one step back for the first update to land on the first pixel
+	enc.y = enc.minY
+}
+
 func (enc *Encoder) advancePixel() {
 	enc.updatePosition()
-	pix := color.NRGBAModel.Convert(enc.img.At(enc.x, enc.y))
-	r, g, b, a := pix.RGBA()
+	pix := enc.img.At(enc.x, enc.y).(color.NRGBA)
 	enc.previousPixel = enc.currentPixel
-	enc.currentPixel = newUnpremultipliedPixel(r, g, b, a)
+	enc.currentPixel = newPixel([4]byte{pix.R, pix.G, pix.B, pix.A})
 }
 
 func (enc *Encoder) updatePosition() {

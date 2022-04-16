@@ -50,8 +50,6 @@ type Decoder struct {
 	currentByte   byte
 	img           image.Image
 	imgPixelBytes []byte
-
-	opMap map[byte]func() error
 }
 
 func NewDecoder(data io.Reader) Decoder {
