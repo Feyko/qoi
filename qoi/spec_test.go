@@ -10,23 +10,23 @@ import (
 
 func TestHeaderWrite(t *testing.T) {
 	header := Header{
-		magic:      qoiMagicBytes,
-		width:      400,
-		height:     400,
-		channels:   4,
-		colorspace: 1,
+		Magic:      QoiMagicBytes,
+		Width:      400,
+		Height:     400,
+		Channels:   4,
+		Colorspace: 1,
 	}
 	expectedBytes := make([]byte, 0, headerLength)
 	expectedBuf := bytes.NewBuffer(expectedBytes)
-	err := binary.Write(expectedBuf, binary.BigEndian, header.magic)
+	err := binary.Write(expectedBuf, binary.BigEndian, header.Magic)
 	require.NoError(t, err)
-	err = binary.Write(expectedBuf, binary.BigEndian, header.width)
+	err = binary.Write(expectedBuf, binary.BigEndian, header.Width)
 	require.NoError(t, err)
-	err = binary.Write(expectedBuf, binary.BigEndian, header.height)
+	err = binary.Write(expectedBuf, binary.BigEndian, header.Height)
 	require.NoError(t, err)
-	err = binary.Write(expectedBuf, binary.BigEndian, header.channels)
+	err = binary.Write(expectedBuf, binary.BigEndian, header.Channels)
 	require.NoError(t, err)
-	err = binary.Write(expectedBuf, binary.BigEndian, header.colorspace)
+	err = binary.Write(expectedBuf, binary.BigEndian, header.Colorspace)
 	require.NoError(t, err)
 	answerBuf := new(bytes.Buffer)
 	err = header.write(answerBuf)

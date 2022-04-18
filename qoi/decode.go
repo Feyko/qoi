@@ -16,35 +16,28 @@ func init() {
 // Decode reads a QOI image from r and returns it as an image.Image.
 func Decode(r io.Reader) (image.Image, error) {
 	decoder := NewDecoder(r)
-	err := decoder.decodeHeader()
-	if err != nil {
-		return nil, fmt.Errorf("could not decode the header: %w", err)
-	}
-	img, err := decoder.decodeBody()
-	if err != nil {
-		return nil, fmt.Errorf("could not decode the image body: %w", err)
-	}
-	return img, nil
+	return decoder.Decode()
 }
 
 //DecodeConfig returns the color model and dimensions of a QOI image without decoding the entire image.
 func DecodeConfig(r io.Reader) (image.Config, error) {
 	decoder := NewDecoder(r)
-	err := decoder.decodeHeader()
+	err := decoder.DecodeHeader()
 	if err != nil {
-		return image.Config{}, fmt.Errorf("could not decode the header: %w", err)
+		return image.Config{}, fmt.Errorf("could not decode the Header: %w", err)
 	}
 	return image.Config{
 		ColorModel: color.NRGBAModel,
-		Width:      int(decoder.header.width),
-		Height:     int(decoder.header.height),
+		Width:      int(decoder.Header.Width),
+		Height:     int(decoder.Header.Height),
 	}, nil
 }
 
 type Decoder struct {
 	data          *bufio.Reader
 	headerBytes   headerBytes
-	header        Header
+	Header        Header
+	decodedHeader bool
 	pixelWindow   [windowLength]pixel
 	currentPixel  pixel
 	currentByte   byte
@@ -56,15 +49,29 @@ func NewDecoder(data io.Reader) Decoder {
 	return Decoder{data: bufio.NewReader(data)}
 }
 
-func (d *Decoder) decodeHeader() error {
+func (d *Decoder) Decode() (image.Image, error) {
+	if !d.decodedHeader {
+		err := d.DecodeHeader()
+		if err != nil {
+			return nil, fmt.Errorf("could not decode the Header: %w", err)
+		}
+	}
+	img, err := d.decodeBody()
+	if err != nil {
+		return nil, fmt.Errorf("could not decode the image body: %w", err)
+	}
+	return img, nil
+}
+
+func (d *Decoder) DecodeHeader() error {
 	err := d.readHeader()
 	if err != nil {
-		return fmt.Errorf("could not read header: %w", err)
+		return fmt.Errorf("could not read Header: %w", err)
 	}
 	header, err := interpretHeaderBytes(d.headerBytes)
-	d.header = header
+	d.Header = header
 	if err != nil {
-		return fmt.Errorf("invalid header: %w", err)
+		return fmt.Errorf("invalid Header: %w", err)
 	}
 	return nil
 }
@@ -78,8 +85,8 @@ func (d *Decoder) readHeader() error {
 }
 
 func (d *Decoder) decodeBody() (image.Image, error) {
-	d.currentPixel = newPixel([4]byte{0, 0, 0, 255})
-	img := image.NewNRGBA(image.Rect(0, 0, int(d.header.width), int(d.header.height)))
+	d.currentPixel = newPixel(pixelBytes{0, 0, 0, 255})
+	img := image.NewNRGBA(image.Rect(0, 0, int(d.Header.Width), int(d.Header.Height)))
 	d.img = img
 	d.imgPixelBytes = img.Pix
 	for len(d.imgPixelBytes) > 0 {
@@ -109,17 +116,17 @@ func (d *Decoder) cacheCurrentPixel() {
 func (d *Decoder) dispatchOP() error {
 	op := getOP(d.currentByte)
 	switch op {
-	case quoi_OP_RGB:
+	case QOI_OP_RGB:
 		return d.op_RGB()
-	case quoi_OP_RGBA:
+	case QOI_OP_RGBA:
 		return d.op_RGBA()
-	case quoi_OP_INDEX:
+	case QOI_OP_INDEX:
 		return d.op_INDEX()
-	case quoi_OP_DIFF:
+	case QOI_OP_DIFF:
 		return d.op_DIFF()
-	case quoi_OP_LUMA:
+	case QOI_OP_LUMA:
 		return d.op_LUMA()
-	case quoi_OP_RUN:
+	case QOI_OP_RUN:
 		return d.op_RUN()
 	default:
 		panic("Unknown OP")

@@ -7,24 +7,24 @@ import (
 )
 
 const (
-	quoi_OP_RGB   byte = 0b11111110
-	quoi_OP_RGBA  byte = 0b11111111
-	quoi_OP_INDEX byte = 0b00000000
-	quoi_OP_DIFF  byte = 0b01000000
-	quoi_OP_LUMA  byte = 0b10000000
-	quoi_OP_RUN   byte = 0b11000000
+	QOI_OP_RGB   byte = 0b11111110
+	QOI_OP_RGBA  byte = 0b11111111
+	QOI_OP_INDEX byte = 0b00000000
+	QOI_OP_DIFF  byte = 0b01000000
+	QOI_OP_LUMA  byte = 0b10000000
+	QOI_OP_RUN   byte = 0b11000000
 
-	quoi_2B_MASK byte = 0b11000000
+	QOI_2B_MASK byte = 0b11000000
 )
 
 func getOP(b byte) byte {
 	switch b {
-	case quoi_OP_RGB, quoi_OP_RGBA:
+	case QOI_OP_RGB, QOI_OP_RGBA:
 		return b
 	}
-	masked := b & quoi_2B_MASK
+	masked := b & QOI_2B_MASK
 	switch masked {
-	case quoi_OP_INDEX, quoi_OP_DIFF, quoi_OP_LUMA, quoi_OP_RUN:
+	case QOI_OP_INDEX, QOI_OP_DIFF, QOI_OP_LUMA, QOI_OP_RUN:
 		return masked
 	default:
 		panic("Unknown OP")
@@ -42,21 +42,21 @@ const (
 
 type headerBytes [headerLength]byte
 
-var qoiMagicBytes = [4]byte{byte('q'), byte('o'), byte('i'), byte('f')}
+var QoiMagicBytes = [4]byte{byte('q'), byte('o'), byte('i'), byte('f')}
 
 type Header struct {
-	magic      [4]byte
-	width      uint32
-	height     uint32
-	channels   byte
-	colorspace byte
+	Magic      [4]byte
+	Width      uint32
+	Height     uint32
+	Channels   byte
+	Colorspace byte
 }
 
 func interpretHeaderBytes(headerBytes headerBytes) (Header, error) {
 	var magic [4]byte
 	copy(magic[:], headerBytes[:4])
-	if magic != qoiMagicBytes {
-		return Header{}, fmt.Errorf("invalid magic %v, expected %v", magic, qoiMagicBytes)
+	if magic != QoiMagicBytes {
+		return Header{}, fmt.Errorf("invalid Magic %v, expected %v", magic, QoiMagicBytes)
 	}
 	width := binary.BigEndian.Uint32(headerBytes[4:])
 	length := binary.BigEndian.Uint32(headerBytes[8:])

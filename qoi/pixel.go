@@ -2,12 +2,14 @@ package qoi
 
 var c int
 
+type pixelBytes [4]byte
+
 type pixel struct {
-	v    [4]byte
+	v    pixelBytes
 	hash byte
 }
 
-func newPixel(v [4]byte) (p pixel) {
+func newPixel(v pixelBytes) (p pixel) {
 	p = pixel{v: v}
 	p.calculateHash()
 	return
@@ -29,7 +31,7 @@ func (p pixel) A() byte {
 	return p.v[3]
 }
 
-// the mulX methods allow for some compiler magic to minimally enhance performance. Don't ask me how it works. Also helps with profiling
+// the mulX methods allow for some compiler Magic to minimally enhance performance. Don't ask me how it works. Also helps with profiling
 func (p pixel) mulR() byte {
 	return p.R() * 3
 }

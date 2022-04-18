@@ -16,7 +16,7 @@ func Encode(w io.Writer, m image.Image) error {
 type Encoder struct {
 	out                          *bufio.Writer
 	img                          *image.NRGBA
-	header                       Header
+	Header                       Header
 	window                       [windowLength]pixel
 	previousPixel, currentPixel  pixel
 	diffR, diffG, diffB, diffA   int8
@@ -50,16 +50,16 @@ func (enc Encoder) Encode() error {
 	width := enc.img.Bounds().Size().X
 	height := enc.img.Bounds().Size().Y
 	header := Header{
-		magic:      qoiMagicBytes,
-		width:      uint32(width),
-		height:     uint32(height),
-		channels:   4,
-		colorspace: 1,
+		Magic:      QoiMagicBytes,
+		Width:      uint32(width),
+		Height:     uint32(height),
+		Channels:   4,
+		Colorspace: 1,
 	}
-	enc.header = header
+	enc.Header = header
 	err := enc.encodeHeader()
 	if err != nil {
-		return fmt.Errorf("could not encode the header: %w", err)
+		return fmt.Errorf("could not encode the Header: %w", err)
 	}
 	err = enc.encodeBody()
 	if err != nil {
@@ -69,11 +69,11 @@ func (enc Encoder) Encode() error {
 }
 
 func (enc *Encoder) encodeHeader() error {
-	return enc.header.write(enc.out)
+	return enc.Header.write(enc.out)
 }
 
 func (enc *Encoder) encodeBody() error {
-	enc.currentPixel = newPixel([4]byte{0, 0, 0, 255})
+	enc.currentPixel = newPixel(pixelBytes{0, 0, 0, 255})
 
 	enc.setupBounds()
 	enc.setupPosition()
@@ -112,7 +112,7 @@ func (enc *Encoder) advancePixel() {
 	enc.updatePosition()
 	pix := enc.img.At(enc.x, enc.y).(color.NRGBA)
 	enc.previousPixel = enc.currentPixel
-	enc.currentPixel = newPixel([4]byte{pix.R, pix.G, pix.B, pix.A})
+	enc.currentPixel = newPixel(pixelBytes{pix.R, pix.G, pix.B, pix.A})
 }
 
 func (enc *Encoder) updatePosition() {
@@ -168,7 +168,7 @@ func (enc *Encoder) isCurrentPixelWithinLUMASpec() bool {
 }
 
 func (enc *Encoder) op_RGB() error {
-	err := enc.out.WriteByte(quoi_OP_RGB)
+	err := enc.out.WriteByte(QOI_OP_RGB)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
@@ -181,7 +181,7 @@ func (enc *Encoder) op_RGB() error {
 }
 
 func (enc *Encoder) op_RGBA() error {
-	err := enc.out.WriteByte(quoi_OP_RGBA)
+	err := enc.out.WriteByte(QOI_OP_RGBA)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
@@ -194,7 +194,7 @@ func (enc *Encoder) op_RGBA() error {
 }
 
 func (enc *Encoder) op_INDEX() error {
-	err := enc.out.WriteByte(quoi_OP_INDEX | enc.currentPixel.hash)
+	err := enc.out.WriteByte(QOI_OP_INDEX | enc.currentPixel.hash)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
@@ -206,7 +206,7 @@ func (enc *Encoder) op_DIFF() error {
 	r := byte(enc.diffR+diffBias) << 4
 	g := byte(enc.diffG+diffBias) << 2
 	b := byte(enc.diffB + diffBias)
-	err := enc.out.WriteByte(quoi_OP_DIFF | r | g | b)
+	err := enc.out.WriteByte(QOI_OP_DIFF | r | g | b)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
@@ -217,7 +217,7 @@ func (enc *Encoder) op_DIFF() error {
 func (enc *Encoder) op_LUMA() error {
 	directionRG := byte(enc.diffR - enc.diffG + lumaBias)
 	directionBG := byte(enc.diffB - enc.diffG + lumaBias)
-	err := enc.out.WriteByte(quoi_OP_LUMA | byte(enc.diffG+lumaGreenBias))
+	err := enc.out.WriteByte(QOI_OP_LUMA | byte(enc.diffG+lumaGreenBias))
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
@@ -239,7 +239,7 @@ func (enc *Encoder) op_RUN() error {
 			break
 		}
 	}
-	err := enc.out.WriteByte(quoi_OP_RUN | byte(count) - runBias)
+	err := enc.out.WriteByte(QOI_OP_RUN | byte(count) - runBias)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
