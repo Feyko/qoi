@@ -59,12 +59,12 @@ func NewDecoder(data io.Reader) Decoder {
 func (d *Decoder) decodeHeader() error {
 	err := d.readHeader()
 	if err != nil {
-		return fmt.Errorf("could notdecodeImage read header: %w", err)
+		return fmt.Errorf("could not read header: %w", err)
 	}
 	header, err := interpretHeaderBytes(d.headerBytes)
 	d.header = header
 	if err != nil {
-		return fmt.Errorf("could not interpret the header: %w", err)
+		return fmt.Errorf("invalid header: %w", err)
 	}
 	return nil
 }
@@ -89,7 +89,7 @@ func (d *Decoder) decodeBody() (image.Image, error) {
 			return d.img, nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("could not read the necessary data: %w", err)
 		}
 		d.currentByte = b
 		err = d.dispatchOP()
@@ -128,16 +128,22 @@ func (d *Decoder) dispatchOP() error {
 
 func (d *Decoder) op_RGB() error {
 	_, err := io.ReadFull(d.data, d.currentPixel.v[:3])
+	if err != nil {
+		return fmt.Errorf("could not read the necessary data: %w", err)
+	}
 	d.currentPixel.calculateHash()
 	d.writeCurrentPixel()
-	return err
+	return nil
 }
 
 func (d *Decoder) op_RGBA() error {
 	_, err := io.ReadFull(d.data, d.currentPixel.v[:])
+	if err != nil {
+		return fmt.Errorf("could not read the necessary data: %w", err)
+	}
 	d.currentPixel.calculateHash()
 	d.writeCurrentPixel()
-	return err
+	return nil
 }
 
 func (d *Decoder) op_INDEX() error {
@@ -162,7 +168,7 @@ func (d *Decoder) op_LUMA() error {
 	b1 := d.currentByte
 	b2, err := d.data.ReadByte()
 	if err != nil {
-		return err
+		return fmt.Errorf("could not read the necessary data: %w", err)
 	}
 	r, g, b := getLUMAValues(b1, b2)
 	d.currentPixel.Add(r, g, b)
@@ -180,7 +186,7 @@ func getLUMAValues(b1, b2 byte) (byte, byte, byte) {
 func (d *Decoder) op_RUN() error {
 	run := (d.currentByte & 0b00111111) + runBias
 	if run > 62 {
-		return errors.New("illegal RUN value")
+		return errors.New("illegal RUN value (>62)")
 	}
 	d.repeat(run)
 	return nil

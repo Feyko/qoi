@@ -61,7 +61,11 @@ func (enc Encoder) Encode() error {
 	if err != nil {
 		return fmt.Errorf("could not encode the header: %w", err)
 	}
-	return enc.encodeBody()
+	err = enc.encodeBody()
+	if err != nil {
+		return fmt.Errorf("could not encode the body: %w", err)
+	}
+	return nil
 }
 
 func (enc *Encoder) encodeHeader() error {
@@ -83,9 +87,13 @@ func (enc *Encoder) encodeBody() error {
 	}
 	_, err := enc.out.Write([]byte{0, 0, 0, 0, 0, 0, 0, 1})
 	if err != nil {
-		return err
+		return fmt.Errorf("could not write the end padding: %w", err)
 	}
-	return enc.out.Flush()
+	err = enc.out.Flush()
+	if err != nil {
+		return fmt.Errorf("could not flush to disk: %w", err)
+	}
+	return nil
 }
 
 func (enc *Encoder) setupBounds() {
@@ -162,27 +170,36 @@ func (enc *Encoder) isCurrentPixelWithinLUMASpec() bool {
 func (enc *Encoder) op_RGB() error {
 	err := enc.out.WriteByte(quoi_OP_RGB)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
 	_, err = enc.out.Write(enc.currentPixel.v[:3])
+	if err != nil {
+		return fmt.Errorf("could not write the necessary data: %w", err)
+	}
 	enc.advancePixel()
-	return err
+	return nil
 }
 
 func (enc *Encoder) op_RGBA() error {
 	err := enc.out.WriteByte(quoi_OP_RGBA)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
 	_, err = enc.out.Write(enc.currentPixel.v[:])
+	if err != nil {
+		return fmt.Errorf("could not write the necessary data: %w", err)
+	}
 	enc.advancePixel()
-	return err
+	return nil
 }
 
 func (enc *Encoder) op_INDEX() error {
 	err := enc.out.WriteByte(quoi_OP_INDEX | enc.currentPixel.hash)
+	if err != nil {
+		return fmt.Errorf("could not write the necessary data: %w", err)
+	}
 	enc.advancePixel()
-	return err
+	return nil
 }
 
 func (enc *Encoder) op_DIFF() error {
@@ -190,8 +207,11 @@ func (enc *Encoder) op_DIFF() error {
 	g := byte(enc.diffG+diffBias) << 2
 	b := byte(enc.diffB + diffBias)
 	err := enc.out.WriteByte(quoi_OP_DIFF | r | g | b)
+	if err != nil {
+		return fmt.Errorf("could not write the necessary data: %w", err)
+	}
 	enc.advancePixel()
-	return err
+	return nil
 }
 
 func (enc *Encoder) op_LUMA() error {
@@ -199,11 +219,14 @@ func (enc *Encoder) op_LUMA() error {
 	directionBG := byte(enc.diffB - enc.diffG + lumaBias)
 	err := enc.out.WriteByte(quoi_OP_LUMA | byte(enc.diffG+lumaGreenBias))
 	if err != nil {
-		return err
+		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
 	err = enc.out.WriteByte(directionRG<<4 | directionBG)
+	if err != nil {
+		return fmt.Errorf("could not write the necessary data: %w", err)
+	}
 	enc.advancePixel()
-	return err
+	return nil
 }
 
 func (enc *Encoder) op_RUN() error {
@@ -216,5 +239,9 @@ func (enc *Encoder) op_RUN() error {
 			break
 		}
 	}
-	return enc.out.WriteByte(quoi_OP_RUN | byte(count) - runBias)
+	err := enc.out.WriteByte(quoi_OP_RUN | byte(count) - runBias)
+	if err != nil {
+		return fmt.Errorf("could not write the necessary data: %w", err)
+	}
+	return nil
 }
