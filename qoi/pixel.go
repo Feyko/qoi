@@ -1,5 +1,7 @@
 package qoi
 
+import "image/color"
+
 var c int
 
 type pixelBytes [4]byte
@@ -13,6 +15,11 @@ func newPixel(v pixelBytes) (p pixel) {
 	p = pixel{v: v}
 	p.calculateHash()
 	return
+}
+
+func pixelFromColor(c color.Color) pixel {
+	r, g, b, a := c.RGBA()
+	return newPixel([4]byte{byte(r), byte(g), byte(b), byte(a)})
 }
 
 func (p pixel) R() byte {

@@ -2,11 +2,17 @@ package qoi
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
+	"golang.org/x/exp/slices"
 	"image"
 	"image/color"
 	"io"
+	"runtime"
+	"sync"
 )
+
+var stripCount = runtime.NumCPU() * 8
 
 //Encode writes the Image m to w in PNG format. Any Image may be encoded, but images that are not image.NRGBA might be encoded lossily.
 func Encode(w io.Writer, m image.Image) error {
@@ -14,9 +20,20 @@ func Encode(w io.Writer, m image.Image) error {
 }
 
 type Encoder struct {
-	out                          *bufio.Writer
+	out    *bufio.Writer
+	img    *image.NRGBA
+	Header Header
+	window [windowLength]pixel
+	strips []*strip
+	//previousPixel, currentPixel  pixel
+	//diffR, diffG, diffB, diffA   int8
+	//minX, maxX, minY, maxY, x, y int
+}
+
+type strip struct {
+	n, stripCount                int
+	out                          bytes.Buffer
 	img                          *image.NRGBA
-	Header                       Header
 	window                       [windowLength]pixel
 	previousPixel, currentPixel  pixel
 	diffR, diffG, diffB, diffA   int8
@@ -24,11 +41,16 @@ type Encoder struct {
 	done                         bool
 }
 
+type result struct {
+	n int
+	b []byte
+}
+
 func NewEncoder(out io.Writer, img image.Image) Encoder {
 	if !isImageNRGBA(img) {
 		img = convertImageToNRGBA(img)
 	}
-	return Encoder{out: bufio.NewWriter(out), img: img.(*image.NRGBA)}
+	return Encoder{out: bufio.NewWriter(out), img: img.(*image.NRGBA), strips: make([]*strip, stripCount)}
 }
 
 func isImageNRGBA(img image.Image) bool {
@@ -73,173 +95,233 @@ func (enc *Encoder) encodeHeader() error {
 }
 
 func (enc *Encoder) encodeBody() error {
-	enc.currentPixel = newPixel(pixelBytes{0, 0, 0, 255})
+	for i := 0; i < stripCount; i++ {
+		enc.strips[i] = enc.newStrip(i, stripCount)
+	}
 
-	enc.setupBounds()
-	enc.setupPosition()
+	results := make(chan result)
+	r := make([][]byte, stripCount)
+	var group sync.WaitGroup
+	group.Add(stripCount)
 
-	enc.advancePixel()
-	for !enc.done {
-		err := enc.dispatchOP()
+	go func() {
+		for {
+			res := <-results
+			r[res.n] = res.b
+			group.Done()
+		}
+	}()
+
+	for _, strp := range enc.strips {
+		strp := strp
+		go func() {
+			var b []byte
+			err := strp.encodeBody(&b)
+			if err != nil {
+				panic(err)
+			}
+			results <- result{strp.n, b}
+		}()
+	}
+	group.Wait()
+	for i := 0; i < stripCount; i++ {
+		_, err := enc.out.Write(r[i])
 		if err != nil {
-			return err
+			panic(err)
 		}
 	}
+
 	_, err := enc.out.Write([]byte{0, 0, 0, 0, 0, 0, 0, 1})
 	if err != nil {
 		return fmt.Errorf("could not write the end padding: %w", err)
 	}
 	err = enc.out.Flush()
 	if err != nil {
-		return fmt.Errorf("could not flush to disk: %w", err)
+		return fmt.Errorf("could not flush data: %w", err)
 	}
+
 	return nil
 }
 
-func (enc *Encoder) setupBounds() {
-	enc.minX = enc.img.Bounds().Min.X
-	enc.maxX = enc.img.Bounds().Max.X - 1 // 'Max' is the size of the image, not the maximum index we can use
-	enc.minY = enc.img.Bounds().Min.Y
-	enc.maxY = enc.img.Bounds().Max.Y - 1
+func (enc *Encoder) newStrip(n, stripCount int) *strip {
+	strp := &strip{n: n, stripCount: stripCount, img: enc.img}
+	strp.setupBounds()
+	return strp
 }
 
-func (enc *Encoder) setupPosition() {
-	enc.x = enc.minX - 1 // Initialise one step back for the first update to land on the first pixel
-	enc.y = enc.minY
+func (strp *strip) encodeBody(r *[]byte) error {
+
+	strp.currentPixel = pixelFromColor(strp.img.At(strp.maxX, strp.minY-1))
+
+	strp.setupPosition()
+
+	strp.advancePixel()
+	for !strp.done {
+		err := strp.dispatchOP()
+		if err != nil {
+			return err
+		}
+	}
+	*r = slices.Clone(strp.out.Bytes())
+	return nil
 }
 
-func (enc *Encoder) advancePixel() {
-	enc.updatePosition()
-	pix := enc.img.At(enc.x, enc.y).(color.NRGBA)
-	enc.previousPixel = enc.currentPixel
-	enc.currentPixel = newPixel(pixelBytes{pix.R, pix.G, pix.B, pix.A})
+func (strp *strip) setupBounds() {
+	bounds := strp.img.Bounds()
+	stripCount := strp.stripCount
+	commonStripSize := bounds.Max.Y/stripCount + 1
+	thisStripSize := commonStripSize
+
+	if strp.n+1 == stripCount {
+		thisStripSize += commonStripSize*stripCount - bounds.Max.Y
+	}
+
+	strp.minX = bounds.Min.X
+	strp.maxX = bounds.Max.X - 1 // 'Max' is the size of the image, not the maximum index we can use
+	strp.minY = commonStripSize * strp.n
+	strp.maxY = strp.minY + thisStripSize
+	if strp.minY != 0 {
+		strp.minY += 1
+	}
 }
 
-func (enc *Encoder) updatePosition() {
-	if enc.x == enc.maxX && enc.y == enc.maxY {
-		enc.done = true
+func (strp *strip) setupPosition() {
+	strp.x = strp.minX - 1 // Initialise one step back for the first update to land on the first pixel
+	strp.y = strp.minY
+}
+
+func (strp *strip) advancePixel() {
+	strp.updatePosition()
+	pix := strp.img.At(strp.x, strp.y).(color.NRGBA)
+	strp.previousPixel = strp.currentPixel
+	strp.currentPixel = newPixel(pixelBytes{pix.R, pix.G, pix.B, pix.A})
+}
+
+func (strp *strip) updatePosition() {
+	if strp.x == strp.maxX && strp.y == strp.maxY {
+		strp.done = true
 		return
 	}
-	if enc.x == enc.maxX {
-		enc.y++
-		enc.x = enc.minX
+	if strp.x == strp.maxX {
+		strp.y++
+		strp.x = strp.minX
 	} else {
-		enc.x++
+		strp.x++
 	}
 	return
 }
 
-func (enc *Encoder) cacheCurrentPixel() {
-	enc.window[enc.currentPixel.Hash()] = enc.currentPixel // We do not check for equality as copying a 4B array is faster than checking
+func (strp *strip) cacheCurrentPixel() {
+	strp.window[strp.currentPixel.Hash()] = strp.currentPixel // We do not check for equality as copying a 4B array is faster than checking
 }
 
-func (enc *Encoder) dispatchOP() error {
-	if enc.currentPixel == enc.previousPixel {
-		return enc.op_RUN()
+func (strp *strip) dispatchOP() error {
+	if strp.currentPixel == strp.previousPixel {
+		return strp.op_RUN()
 	}
-	if enc.window[enc.currentPixel.hash] == enc.currentPixel {
-		return enc.op_INDEX()
+	if strp.window[strp.currentPixel.hash] == strp.currentPixel {
+		return strp.op_INDEX()
 	}
-	enc.cacheCurrentPixel()
-	enc.calculateDiff()
-	if enc.diffA != 0 {
-		return enc.op_RGBA()
+	strp.cacheCurrentPixel()
+	strp.calculateDiff()
+	if strp.diffA != 0 {
+		return strp.op_RGBA()
 	}
-	if enc.isCurrentPixelWithinDIFFSpec() {
-		return enc.op_DIFF()
+	if strp.isCurrentPixelWithinDIFFSpec() {
+		return strp.op_DIFF()
 	}
-	if enc.isCurrentPixelWithinLUMASpec() {
-		return enc.op_LUMA()
+	if strp.isCurrentPixelWithinLUMASpec() {
+		return strp.op_LUMA()
 	}
 
-	return enc.op_RGB()
+	return strp.op_RGB()
 }
 
-func (enc *Encoder) calculateDiff() {
-	enc.diffR, enc.diffG, enc.diffB, enc.diffA = enc.currentPixel.Minus(enc.previousPixel)
+func (strp *strip) calculateDiff() {
+	strp.diffR, strp.diffG, strp.diffB, strp.diffA = strp.currentPixel.Minus(strp.previousPixel)
 }
 
-func (enc *Encoder) isCurrentPixelWithinDIFFSpec() bool {
-	return isValueWithinDIFFSpec(enc.diffR) && isValueWithinDIFFSpec(enc.diffG) && isValueWithinDIFFSpec(enc.diffB)
+func (strp *strip) isCurrentPixelWithinDIFFSpec() bool {
+	return isValueWithinDIFFSpec(strp.diffR) && isValueWithinDIFFSpec(strp.diffG) && isValueWithinDIFFSpec(strp.diffB)
 }
 
-func (enc *Encoder) isCurrentPixelWithinLUMASpec() bool {
-	return isValueWithinLUMASpec(enc.diffR-enc.diffG) && isGreenValueWithinLUMASpec(enc.diffG) && isValueWithinLUMASpec(enc.diffB-enc.diffG)
+func (strp *strip) isCurrentPixelWithinLUMASpec() bool {
+	return isValueWithinLUMASpec(strp.diffR-strp.diffG) && isGreenValueWithinLUMASpec(strp.diffG) && isValueWithinLUMASpec(strp.diffB-strp.diffG)
 }
 
-func (enc *Encoder) op_RGB() error {
-	err := enc.out.WriteByte(QOI_OP_RGB)
+func (strp *strip) op_RGB() error {
+	err := strp.out.WriteByte(QOI_OP_RGB)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
-	_, err = enc.out.Write(enc.currentPixel.v[:3])
+	_, err = strp.out.Write(strp.currentPixel.v[:3])
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
-	enc.advancePixel()
+	strp.advancePixel()
 	return nil
 }
 
-func (enc *Encoder) op_RGBA() error {
-	err := enc.out.WriteByte(QOI_OP_RGBA)
+func (strp *strip) op_RGBA() error {
+	err := strp.out.WriteByte(QOI_OP_RGBA)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
-	_, err = enc.out.Write(enc.currentPixel.v[:])
+	_, err = strp.out.Write(strp.currentPixel.v[:])
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
-	enc.advancePixel()
+	strp.advancePixel()
 	return nil
 }
 
-func (enc *Encoder) op_INDEX() error {
-	err := enc.out.WriteByte(QOI_OP_INDEX | enc.currentPixel.hash)
+func (strp *strip) op_INDEX() error {
+	err := strp.out.WriteByte(QOI_OP_INDEX | strp.currentPixel.hash)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
-	enc.advancePixel()
+	strp.advancePixel()
 	return nil
 }
 
-func (enc *Encoder) op_DIFF() error {
-	r := byte(enc.diffR+diffBias) << 4
-	g := byte(enc.diffG+diffBias) << 2
-	b := byte(enc.diffB + diffBias)
-	err := enc.out.WriteByte(QOI_OP_DIFF | r | g | b)
+func (strp *strip) op_DIFF() error {
+	r := byte(strp.diffR+diffBias) << 4
+	g := byte(strp.diffG+diffBias) << 2
+	b := byte(strp.diffB + diffBias)
+	err := strp.out.WriteByte(QOI_OP_DIFF | r | g | b)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
-	enc.advancePixel()
+	strp.advancePixel()
 	return nil
 }
 
-func (enc *Encoder) op_LUMA() error {
-	directionRG := byte(enc.diffR - enc.diffG + lumaBias)
-	directionBG := byte(enc.diffB - enc.diffG + lumaBias)
-	err := enc.out.WriteByte(QOI_OP_LUMA | byte(enc.diffG+lumaGreenBias))
+func (strp *strip) op_LUMA() error {
+	directionRG := byte(strp.diffR - strp.diffG + lumaBias)
+	directionBG := byte(strp.diffB - strp.diffG + lumaBias)
+	err := strp.out.WriteByte(QOI_OP_LUMA | byte(strp.diffG+lumaGreenBias))
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
-	err = enc.out.WriteByte(directionRG<<4 | directionBG)
+	err = strp.out.WriteByte(directionRG<<4 | directionBG)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
-	enc.advancePixel()
+	strp.advancePixel()
 	return nil
 }
 
-func (enc *Encoder) op_RUN() error {
+func (strp *strip) op_RUN() error {
 	count := 1
-	enc.advancePixel()
-	for enc.currentPixel == enc.previousPixel && !enc.done {
+	strp.advancePixel()
+	for strp.currentPixel == strp.previousPixel && !strp.done {
 		count++
-		enc.advancePixel()
+		strp.advancePixel()
 		if count == 62 {
 			break
 		}
 	}
-	err := enc.out.WriteByte(QOI_OP_RUN | byte(count) - runBias)
+	err := strp.out.WriteByte(QOI_OP_RUN | byte(count) - runBias)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
 	}
