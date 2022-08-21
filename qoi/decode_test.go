@@ -34,6 +34,6 @@ func TestDecode(t *testing.T) {
 	require.NoErrorf(t, err, "Could not decode the QOI test image: %v", err)
 	pngImg, _, err := image.Decode(pngFile)
 	require.NoErrorf(t, err, "Could not decode the PNG test image: %v", err)
-	assert.Equal(t, pngImg, qoiImg)
+	assert.EqualValues(t, pngImg, qoiImg)
 	imaging.Save(qoiImg, "qoi.png")
 }

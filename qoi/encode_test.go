@@ -29,4 +29,5 @@ func TestEncode(t *testing.T) {
 	require.NoErrorf(t, err, "Could not decode the encoded image: %v", err)
 
 	imaging.Save(qoiImg, "testimages/thonk.qoi.png")
+	require.EqualValuesf(t, pngImg, qoiImg, "The image was not encoded properly")
 }
