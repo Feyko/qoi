@@ -7,7 +7,7 @@ import (
 )
 
 func BenchmarkDecode(b *testing.B) {
-	data, err := os.ReadFile("testimage2.qoi")
+	data, err := os.ReadFile("testimages/place.qoi")
 	if err != nil {
 		b.Fatalf("Could not open the test image: %v", err)
 	}

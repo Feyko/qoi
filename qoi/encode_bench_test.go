@@ -8,7 +8,7 @@ import (
 )
 
 func BenchmarkEncode(b *testing.B) {
-	inputImg, err := imaging.Open("testimage2.qoi")
+	inputImg, err := imaging.Open("testimages/thonk.png")
 	if err != nil {
 		b.Fatalf("Could not open the test image: %v", err)
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 func TestDecodeConfig(t *testing.T) {
-	file, err := os.Open("testimage.qoi")
+	file, err := os.Open("testimages/noanswer.qoi")
 	if err != nil {
 		t.Fatalf("Could not read the test image: %v", err)
 	}
@@ -26,9 +26,9 @@ func TestDecodeConfig(t *testing.T) {
 }
 
 func TestDecode(t *testing.T) {
-	qoiFile, err := os.Open("testimage.qoi")
+	qoiFile, err := os.Open("testimages/noanswer.qoi")
 	require.NoErrorf(t, err, "Could not read the QOI test image: %v", err)
-	pngFile, err := os.Open("testimage.png")
+	pngFile, err := os.Open("testimages/noanswer.png")
 	require.NoErrorf(t, err, "Could not read the PNG test image: %v", err)
 	qoiImg, _, err := image.Decode(qoiFile)
 	require.NoErrorf(t, err, "Could not decode the QOI test image: %v", err)
