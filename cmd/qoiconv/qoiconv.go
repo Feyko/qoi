@@ -32,7 +32,7 @@ func main() {
 		return
 	}
 
-	writeQOIImage(inputImg, inputFilename)
+	writeQOIImage(inputImg, outputFilename)
 }
 
 func printUsage() {
