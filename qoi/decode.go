@@ -46,6 +46,11 @@ type Decoder struct {
 }
 
 func NewDecoder(data io.Reader) Decoder {
+	//info, err := data.(*os.File).Stat()
+	//if err != nil {
+	//	panic(err)
+	//}
+	//fmt.Println(info.Size())
 	return Decoder{data: bufio.NewReader(data)}
 }
 
@@ -110,7 +115,7 @@ func (d *Decoder) decodeBody() (image.Image, error) {
 }
 
 func (d *Decoder) cacheCurrentPixel() {
-	d.pixelWindow[d.currentPixel.Hash()] = d.currentPixel // We do not check for equality as copying a 4B array is faster than checking
+	d.pixelWindow[d.currentPixel.GetHash()] = d.currentPixel // We do not check for equality as copying a 4B array is faster than checking
 }
 
 func (d *Decoder) dispatchOP() error {
@@ -131,6 +136,7 @@ func (d *Decoder) dispatchOP() error {
 	default:
 		panic("Unknown OP")
 	}
+	return nil
 }
 
 func (d *Decoder) op_RGB() error {
@@ -138,17 +144,17 @@ func (d *Decoder) op_RGB() error {
 	if err != nil {
 		return fmt.Errorf("could not read the necessary data: %w", err)
 	}
-	d.currentPixel.calculateHash()
+	d.currentPixel.CalculateHash()
 	d.writeCurrentPixel()
 	return nil
 }
 
 func (d *Decoder) op_RGBA() error {
-	_, err := io.ReadFull(d.data, d.currentPixel.v[:])
+	_, err := io.ReadFull(d.data, d.currentPixel.v[:4])
 	if err != nil {
 		return fmt.Errorf("could not read the necessary data: %w", err)
 	}
-	d.currentPixel.calculateHash()
+	d.currentPixel.CalculateHash()
 	d.writeCurrentPixel()
 	return nil
 }
@@ -206,6 +212,6 @@ func (d *Decoder) repeat(n byte) {
 }
 
 func (d *Decoder) writeCurrentPixel() {
-	copy(d.imgPixelBytes[:4], d.currentPixel.v[:])
+	copy(d.imgPixelBytes, d.currentPixel.v[:])
 	d.imgPixelBytes = d.imgPixelBytes[4:]
 }

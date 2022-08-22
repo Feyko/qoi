@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/gammazero/workerpool"
 	"golang.org/x/exp/slices"
 	"image"
 	"image/color"
@@ -21,7 +22,7 @@ func Encode(w io.Writer, m image.Image) error {
 
 type Encoder struct {
 	out    *bufio.Writer
-	img    *image.NRGBA
+	img    image.Image
 	Header Header
 	window [windowLength]pixel
 	strips []*strip
@@ -33,7 +34,7 @@ type Encoder struct {
 type strip struct {
 	n, stripCount                int
 	out                          bytes.Buffer
-	img                          *image.NRGBA
+	img                          image.Image
 	window                       [windowLength]pixel
 	previousPixel, currentPixel  pixel
 	diffR, diffG, diffB, diffA   int8
@@ -47,10 +48,10 @@ type result struct {
 }
 
 func NewEncoder(out io.Writer, img image.Image) Encoder {
-	if !isImageNRGBA(img) {
-		img = convertImageToNRGBA(img)
-	}
-	return Encoder{out: bufio.NewWriter(out), img: img.(*image.NRGBA), strips: make([]*strip, stripCount)}
+	//if !isImageNRGBA(img) {
+	//	img = convertImageToNRGBA(img)
+	//}
+	return Encoder{out: bufio.NewWriter(out), img: img, strips: make([]*strip, stripCount)}
 }
 
 func isImageNRGBA(img image.Image) bool {
@@ -60,11 +61,15 @@ func isImageNRGBA(img image.Image) bool {
 func convertImageToNRGBA(img image.Image) image.Image {
 	bounds := img.Bounds()
 	newImg := image.NewNRGBA(bounds)
+	pool := workerpool.New(stripCount)
 	for y := 0; y < bounds.Max.Y; y++ {
 		for x := 0; x < bounds.Max.X; x++ {
-			newImg.Set(x, y, img.At(x, y))
+			pool.Submit(func() {
+				newImg.Set(x, y, img.At(x, y))
+			})
 		}
 	}
+	pool.StopWait()
 	return newImg
 }
 
@@ -76,7 +81,7 @@ func (enc Encoder) Encode() error {
 		Width:      uint32(width),
 		Height:     uint32(height),
 		Channels:   4,
-		Colorspace: 1,
+		Colorspace: 0,
 	}
 	enc.Header = header
 	err := enc.encodeHeader()
@@ -151,7 +156,11 @@ func (enc *Encoder) newStrip(n, stripCount int) *strip {
 
 func (strp *strip) encodeBody(r *[]byte) error {
 
-	strp.currentPixel = pixelFromColor(strp.img.At(strp.maxX, strp.minY-1))
+	if (image.Point{X: strp.maxX, Y: strp.minY - 1}.In(strp.img.Bounds())) {
+		strp.currentPixel = pixelFromColor(strp.img.At(strp.maxX, strp.minY-1))
+	} else {
+		strp.currentPixel = newPixel(pixelBytes{0, 0, 0, 255})
+	}
 
 	strp.setupPosition()
 
@@ -191,10 +200,25 @@ func (strp *strip) setupPosition() {
 }
 
 func (strp *strip) advancePixel() {
+	strp.advancePixelPreservable(false)
+}
+
+func (strp *strip) advancePixelPreservable(preserveHash bool) {
 	strp.updatePosition()
-	pix := strp.img.At(strp.x, strp.y).(color.NRGBA)
+	pix, ok := strp.img.At(strp.x, strp.y).(color.NRGBA)
+	var bytes pixelBytes
+	if ok {
+		bytes = pixelBytes{pix.R, pix.G, pix.B, pix.A}
+	} else {
+		pix := strp.img.At(strp.x, strp.y).(color.RGBA)
+		bytes = pixelBytes{pix.R, pix.G, pix.B, pix.A}
+	}
 	strp.previousPixel = strp.currentPixel
-	strp.currentPixel = newPixel(pixelBytes{pix.R, pix.G, pix.B, pix.A})
+	if preserveHash {
+		strp.currentPixel = pixel{v: bytes, hash: strp.previousPixel.hash}
+	} else {
+		strp.currentPixel = newPixel(bytes)
+	}
 }
 
 func (strp *strip) updatePosition() {
@@ -212,7 +236,7 @@ func (strp *strip) updatePosition() {
 }
 
 func (strp *strip) cacheCurrentPixel() {
-	strp.window[strp.currentPixel.Hash()] = strp.currentPixel // We do not check for equality as copying a 4B array is faster than checking
+	strp.window[strp.currentPixel.GetHash()] = strp.currentPixel // We do not check for equality as copying a 4B array is faster than checking
 }
 
 func (strp *strip) dispatchOP() error {
@@ -276,6 +300,12 @@ func (strp *strip) op_RGBA() error {
 }
 
 func (strp *strip) op_INDEX() error {
+	if strp.currentPixel.hash == 0 && strp.currentPixel.A() == 0 {
+		// Edge case handling for new stripes indexing 0 for a fully transparent pixel.
+		// INDEX 0 would most likely be an actual color in a standard decode. So we encode a full RGBA instead
+		// Only checking the Alpha for performance, it's probably inefficient for a few other values but that's alright... probably
+		return strp.op_RGBA()
+	}
 	err := strp.out.WriteByte(QOI_OP_INDEX | strp.currentPixel.hash)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
@@ -313,14 +343,15 @@ func (strp *strip) op_LUMA() error {
 
 func (strp *strip) op_RUN() error {
 	count := 1
-	strp.advancePixel()
+	strp.advancePixelPreservable(true)
 	for strp.currentPixel == strp.previousPixel && !strp.done {
 		count++
-		strp.advancePixel()
+		strp.advancePixelPreservable(true)
 		if count == 62 {
 			break
 		}
 	}
+	strp.currentPixel.CalculateHash()
 	err := strp.out.WriteByte(QOI_OP_RUN | byte(count) - runBias)
 	if err != nil {
 		return fmt.Errorf("could not write the necessary data: %w", err)
